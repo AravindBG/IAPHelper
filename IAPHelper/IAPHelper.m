@@ -20,6 +20,7 @@
 @property (nonatomic,copy) IAPbuyProductCompleteResponseBlock buyProductCompleteBlock;
 @property (nonatomic,copy) resoreProductsCompleteResponseBlock restoreCompletedBlock;
 @property (nonatomic,copy) checkReceiptCompleteResponseBlock checkReceiptCompleteBlock;
+@property (nonatomic,copy) restoreReceipt receiptCompletionBlock;
 
 @property (nonatomic,strong) NSMutableData* receiptRequestData;
 @end
@@ -31,7 +32,6 @@
         
         // Store product identifiers
         _productIdentifiers = productIdentifiers;
-        
         // Check for previously purchased products
         NSMutableSet * purchasedProducts = [NSMutableSet set];
         for (NSString * productIdentifier in _productIdentifiers) {
@@ -51,7 +51,7 @@
         }
         if ([SKPaymentQueue defaultQueue]) {
             [[SKPaymentQueue defaultQueue] addTransactionObserver:self];
-        
+            
             self.purchasedProducts = purchasedProducts;
         }
         
@@ -68,7 +68,7 @@
 
 -(BOOL)isPurchasedProductsIdentifier:(NSString*)productID
 {
-
+    
     BOOL productPurchased = NO;
     
     NSString* password = [SFHFKeychainUtils getPasswordForUsername:productID andServiceName:@"IAPHelper" error:nil];
@@ -76,7 +76,7 @@
     {
         productPurchased = YES;
     }
-
+    
     return productPurchased;
 }
 
@@ -90,19 +90,27 @@
     
 }
 
+- (void)request:(SKRequest *)request didFailWithError:(NSError *)error{
+    
+    if (error && [request isEqual:self.refresh]) {
+        _receiptCompletionBlock(NO);
+    }
+    
+}
+
 - (void)productsRequest:(SKProductsRequest *)request didReceiveResponse:(SKProductsResponse *)response {
     
     self.products = response.products;
     self.request = nil;
-
+    
     if(_requestProductsBlock) {
         _requestProductsBlock (request,response);
     }
-
+    
 }
 
-- (void)recordTransaction:(SKPaymentTransaction *)transaction {    
-    // TODO: Record the transaction on the server side...    
+- (void)recordTransaction:(SKPaymentTransaction *)transaction {
+    // TODO: Record the transaction on the server side...
 }
 
 
@@ -128,7 +136,7 @@
     
     [_purchasedProducts addObject:productIdentifier];
     
-
+    
 }
 
 - (void)clearSavedPurchasedProducts {
@@ -147,8 +155,6 @@
 
 
 - (void)completeTransaction:(SKPaymentTransaction *)transaction {
-    
-  
     
     [self recordTransaction: transaction];
     
@@ -171,8 +177,8 @@
     
     if ([SKPaymentQueue defaultQueue]) {
         [[SKPaymentQueue defaultQueue] finishTransaction: transaction];
-            
-
+        
+        
         if(_buyProductCompleteBlock!=nil)
         {
             _buyProductCompleteBlock(transaction);
@@ -187,7 +193,7 @@
     {
         NSLog(@"Transaction error: %@ %ld", transaction.error.localizedDescription,(long)transaction.error.code);
     }
-
+    
     if ([SKPaymentQueue defaultQueue]) {
         [[SKPaymentQueue defaultQueue] finishTransaction: transaction];
         if(_buyProductCompleteBlock) {
@@ -225,15 +231,14 @@
     
     self.restoreCompletedBlock = nil;
     SKPayment *payment = [SKPayment paymentWithProduct:productIdentifier];
-
+    
     if ([SKPaymentQueue defaultQueue]) {
         [[SKPaymentQueue defaultQueue] addPayment:payment];
     }
-
 }
 
 -(void)restoreProductsWithCompletion:(resoreProductsCompleteResponseBlock)completion {
-
+    
     //clear it
     self.buyProductCompleteBlock = nil;
     
@@ -244,13 +249,15 @@
     else {
         NSLog(@"Cannot get the default Queue");
     }
-    
-    
 }
 
 - (void)paymentQueue:(SKPaymentQueue *)queue restoreCompletedTransactionsFailedWithError:(NSError *)error {
     
     NSLog(@"Transaction error: %@ %ld", error.localizedDescription,(long)error.code);
+    
+    if (error.code == SKErrorUnknown) {
+        NSLog(@"unknown error");
+    }
     if(_restoreCompletedBlock) {
         _restoreCompletedBlock(queue,error);
     }
@@ -266,7 +273,6 @@
             {
                 [self recordTransaction: transaction];
                 [self provideContentWithTransaction:transaction];
-                
             }
             default:
                 break;
@@ -276,7 +282,15 @@
     if(_restoreCompletedBlock) {
         _restoreCompletedBlock(queue,nil);
     }
+    
+}
 
+- (void)restoreReceipt:(restoreReceipt)completionBlock{
+    self.receiptCompletionBlock = completionBlock;
+    
+    self.refresh = [[SKReceiptRefreshRequest alloc] initWithReceiptProperties:nil];
+    self.refresh.delegate = self;
+    [self.refresh start];
 }
 
 - (void)checkReceipt:(NSData*)receiptData onCompletion:(checkReceiptCompleteResponseBlock)completion
@@ -287,13 +301,13 @@
 {
     
     self.checkReceiptCompleteBlock = completion;
-
+    
     NSError *jsonError = nil;
     NSString *receiptBase64 = [NSString base64StringFromData:receiptData length:[receiptData length]];
-
-
+    
+    
     NSData *jsonData = nil;
-
+    
     if(secretKey !=nil && ![secretKey isEqualToString:@""]) {
         
         jsonData = [NSJSONSerialization dataWithJSONObject:[NSDictionary dictionaryWithObjectsAndKeys:receiptBase64,@"receipt-data",
@@ -305,16 +319,16 @@
     }
     else {
         jsonData = [NSJSONSerialization dataWithJSONObject:[NSDictionary dictionaryWithObjectsAndKeys:
-                                                                receiptBase64,@"receipt-data",
-                                                                nil]
-                                                       options:NSJSONWritingPrettyPrinted
-                                                         error:&jsonError
-                        ];
+                                                            receiptBase64,@"receipt-data",
+                                                            nil]
+                                                   options:NSJSONWritingPrettyPrinted
+                                                     error:&jsonError
+                    ];
     }
-
-
-//    NSString* jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
-
+    
+    
+    //    NSString* jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+    
     NSURL *requestURL = nil;
     if(_production)
     {
@@ -323,11 +337,11 @@
     else {
         requestURL = [NSURL URLWithString:@"https://sandbox.itunes.apple.com/verifyReceipt"];
     }
-
+    
     NSMutableURLRequest *req = [[NSMutableURLRequest alloc] initWithURL:requestURL];
     [req setHTTPMethod:@"POST"];
     [req setHTTPBody:jsonData];
-
+    
     NSURLConnection *conn = [[NSURLConnection alloc] initWithRequest:req delegate:self];
     if(conn) {
         self.receiptRequestData = [[NSMutableData alloc] init];
@@ -339,6 +353,12 @@
         if(_checkReceiptCompleteBlock) {
             _checkReceiptCompleteBlock(nil,error);
         }
+    }
+}
+
+- (void)requestDidFinish:(SKRequest *)request{
+    if ([self.refresh isEqual:request]) {
+        _receiptCompletionBlock(YES);
     }
 }
 

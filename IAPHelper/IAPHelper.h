@@ -18,12 +18,16 @@ typedef void (^checkReceiptCompleteResponseBlock)(NSString* response,NSError* er
 
 typedef void (^resoreProductsCompleteResponseBlock) (SKPaymentQueue* payment,NSError* error);
 
+typedef void (^restoreReceipt)(BOOL isSuccessfullyDownloaded);
+
 @interface IAPHelper : NSObject <SKProductsRequestDelegate, SKPaymentTransactionObserver>
 
 @property (nonatomic,strong) NSSet *productIdentifiers;
 @property (nonatomic,strong) NSArray * products;
 @property (nonatomic,strong) NSMutableSet *purchasedProducts;
 @property (nonatomic,strong) SKProductsRequest *request;
+@property (nonatomic, strong) SKReceiptRefreshRequest *refresh;
+
 @property (nonatomic) BOOL production;
 
 - (void)requestProductsWithCompletion:(IAPProductsResponseBlock)completion;
@@ -45,4 +49,7 @@ typedef void (^resoreProductsCompleteResponseBlock) (SKPaymentQueue* payment,NSE
 
 - (void)clearSavedPurchasedProducts;
 - (void)clearSavedPurchasedProductByID:(NSString*)productIdentifier;
+
+- (void)restoreReceipt:(restoreReceipt)completionBlock;
+
 @end
